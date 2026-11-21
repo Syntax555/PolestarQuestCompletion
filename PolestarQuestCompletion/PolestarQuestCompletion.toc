@@ -1,0 +1,11 @@
+## Interface: 16001
+## Title: Polestar: Quest Completion
+## Notes: Zone quest progress and known requirements in Polestar.
+## Title-deDE: Polestar: Quest-Abschluss
+## Notes-deDE: Questfortschritt je Gebiet und bekannte Voraussetzungen in Polestar.
+## Author: Syntax555
+## Version: 0.1.1-beta
+## Dependencies: Polestar
+## SavedVariablesPerCharacter: PolestarQuestCompletionDB
+
+Main.lua
