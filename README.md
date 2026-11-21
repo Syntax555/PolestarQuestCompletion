@@ -1,19 +1,24 @@
 # Polestar Quest Completion
 
-**0.1.1-beta** ergänzt Polestar in *World of Warcraft: Forever* um einen Quest-Tab mit Gebietsfortschritt, Statusfiltern und einer Suche nach Questname oder ID. Das Add-on nutzt Polestars Questdaten und den Queststatus deines Charakters. Polestar ist die einzige Add-on-Abhängigkeit.
+**0.1.2-beta** adds a quest completion tab to Polestar for World of Warcraft: Forever. Browse quests by zone, search by name or ID, and see how many your character has completed. The addon uses Polestar's quest data and WoW's quest status APIs.
 
-## Installation
+The tab follows the WoW client language. It supports English, German, Spanish (Spain and Latin America), French, Korean, Brazilian Portuguese, Russian, Simplified Chinese, and Traditional Chinese. Other clients use English.
 
-1. Installiere den vollständigen [Polestar-Release 0.4.1.1](https://github.com/fitzforge/polestar/releases/tag/v0.4.1.1) für WoW: Forever. Aktiviere `Polestar_QuestDB` im Add-on-Menü der Charakterauswahl und in Polestar unter **Optionen → Questen → Quests → Quest-Datenbank**.
-2. Lade das Installations-ZIP von [GitHub Releases](https://github.com/Syntax555/PolestarQuestCompletion/releases) herunter und entpacke den Ordner `PolestarQuestCompletion` nach `World of Warcraft/_forever_/Interface/AddOns/`. Die `.toc` liegt danach direkt unter `Interface/AddOns/PolestarQuestCompletion/PolestarQuestCompletion.toc`.
-3. Starte den Client vollständig neu, melde dich mit deinem Charakter an und öffne den Tab mit `/pqc` oder `/polestarquests`.
+## Install
 
-## Quest-Fortschritt
+1. Install the full Polestar release. Enable `Polestar_QuestDB` in the character selection AddOns menu and enable **Quest database** under **Polestar Options → Questing → Quests**. [Polestar releases](https://github.com/fitzforge/polestar/releases)
+2. Download the source from **Code → Download ZIP** and extract it. Create `PolestarQuestCompletion` in `World of Warcraft/_forever_/Interface/AddOns/`, then copy `PolestarQuestCompletion.toc` and the Lua files listed in it into that folder. Keep the relative paths from the TOC. [Download source](https://github.com/Syntax555/PolestarQuestCompletion/archive/refs/heads/main.zip)
+3. Restart the game fully, log in, and enter `/pqc` or `/polestarquests`.
 
-- Wähle ein Gebiet oder klicke **Aktuelle Zone**. Der Fortschritt zählt die in Polestar erfassten Gebietsquests, die zum Charakter passen, und verwendet den Abschlussstatus aus dem Spiel. Suche und Filter ändern nur die sichtbare Liste. Gegenseitig ausschließende Quests können den Wert unter 100 % halten.
-- Bewege den Mauszeiger über eine Quest, um bekannte Bedingungen wie Mindeststufe, fehlende Vorquests, im Log benötigte Quests und Berufsanforderungen zu sehen. Der Status **Vermutlich verfügbar** basiert auf den erfassten Bedingungen. Versteckte Voraussetzungen und Datenlücken können die tatsächliche Verfügbarkeit beeinflussen.
-- Über **Ruf & Details** kannst du den optionalen `Polestar_Codex` bei Bedarf laden. Wenn er bereits geladen ist, erscheinen die Zusatzdaten direkt. Der Tooltip zeigt den laut Codex nötigen Rufrang sowie den aktuellen Rang, sofern der Client ihn liefert. Die Anforderung kann die Quest oder ihre Belohnung betreffen. Bei Klick auf die Quest öffnet sich Polestars Lookup.
+CurseForge distribution is pending. For a packaged ZIP from a source checkout, see the [packaging instructions](AGENTS.md#packaging).
 
-## Kompatibilität
+## Quest progress
 
-Zielclient ist WoW: Forever mit Interface `16001`. Die Logik wurde unter Lua 5.1 mit den Datenpaketen aus Polestar 0.4.1.1 und mit den Schnittstellen aus der Vorabversion 0.4.2 geprüft. Konkrete Berufsmindestränge stehen zur Verfügung, wenn der installierte Codex sie ausliest. Ein Test im laufenden WoW-Client steht aus. [Polestar 0.4.1.1](https://github.com/fitzforge/polestar/releases/tag/v0.4.1.1) · [Polestar 0.4.2](https://github.com/fitzforge/polestar/releases/tag/v0.4.2)
+- The zone total includes quests in Polestar's database that match your character. Search and filters narrow the visible list. Some quest paths are mutually exclusive, so a zone can stay below 100%.
+- **Offered now** means the game is currently offering the quest through the open quest or gossip window. **Likely available** means it passed known checks. Completion, quest log membership, and readiness to turn in come directly from the game.
+- Hover over a quest to see known prerequisites. **Check reputation** and **Check profession** identify values the client could not confirm. Some quests have conditions that the client or Polestar's database cannot report.
+- Select **Reputation & details** to load `Polestar_Codex` on demand. If Polestar already loaded it, the data is available immediately. The tooltip can show the required and current reputation or profession rank when those values are available. A Codex reputation requirement can also apply to a reward. Select a quest to open Polestar's Lookup.
+
+## Compatibility
+
+Targets WoW: Forever 1.60.1 (interface `16001`). The addon uses the Polestar 0.4.1.1 stable and 0.4.2 prerelease APIs. Live game testing is pending. [Polestar 0.4.1.1](https://github.com/fitzforge/polestar/releases/tag/v0.4.1.1) · [Polestar 0.4.2](https://github.com/fitzforge/polestar/releases/tag/v0.4.2)

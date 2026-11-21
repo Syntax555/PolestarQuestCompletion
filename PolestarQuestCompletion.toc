@@ -1,0 +1,28 @@
+## Interface: 16001
+## Title: Polestar: Quest Completion
+## Notes: Zone quest progress and known requirements in Polestar.
+## Title-deDE: Polestar: Quest-Abschluss
+## Notes-deDE: Questfortschritt je Gebiet und bekannte Voraussetzungen in Polestar.
+## Title-esES: Polestar: Progreso de misiones
+## Notes-esES: Progreso de misiones por zona y requisitos conocidos en Polestar.
+## Title-esMX: Polestar: Progreso de misiones
+## Notes-esMX: Progreso de misiones por zona y requisitos conocidos en Polestar.
+## Title-frFR: Polestar : Progression des quêtes
+## Notes-frFR: Progression des quêtes par zone et prérequis connus dans Polestar.
+## Title-koKR: Polestar: 퀘스트 진행도
+## Notes-koKR: Polestar에서 지역별 퀘스트 진행도와 알려진 요구 조건을 표시합니다.
+## Title-ptBR: Polestar: Progresso de missões
+## Notes-ptBR: Progresso de missões por área e requisitos conhecidos no Polestar.
+## Title-ruRU: Polestar: Прогресс заданий
+## Notes-ruRU: Прогресс заданий по зонам и известные требования в Polestar.
+## Title-zhCN: Polestar：任务进度
+## Notes-zhCN: 在 Polestar 中显示各区域的任务进度和已知要求。
+## Title-zhTW: Polestar：任務進度
+## Notes-zhTW: 在 Polestar 中顯示各區域的任務進度與已知條件。
+## Author: Syntax555
+## Version: 0.1.2-beta
+## Dependencies: Polestar
+## SavedVariablesPerCharacter: PolestarQuestCompletionDB
+
+Locale.lua
+Main.lua

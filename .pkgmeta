@@ -1,0 +1,7 @@
+package-as: PolestarQuestCompletion
+enable-nolib-creation: no
+ignore:
+  - AGENTS.md
+  - README.md
+required-dependencies:
+  - polestar

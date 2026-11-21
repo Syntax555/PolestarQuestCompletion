@@ -1,6 +1,8 @@
 -- Independent Polestar Hub section for WoW: Forever.
 -- Reads Polestar's existing data and the current character's quest state.
 
+local _, addon = ...
+local L = addon.L
 local PS = _G.Polestar
 local UI, Q, C = PS and PS.UI, PS and PS.QuestDB, PS and PS.Compat
 local Picker = UI and UI.Picker
@@ -10,7 +12,7 @@ local SECTION = "QuestCompletion"
 SLASH_POLESTARQUESTCOMPLETION1 = "/pqc"
 SLASH_POLESTARQUESTCOMPLETION2 = "/polestarquests"
 SlashCmdList.POLESTARQUESTCOMPLETION = function()
-    print("Polestar Quest Completion: Installiere eine kompatible Polestar-Version (getestet mit 0.4.1.1).")
+    print(L.compatible)
 end
 
 -- The hub and the QuestDB record interface are internal to Polestar.
@@ -30,33 +32,15 @@ if type(S) ~= "table" then
 end
 
 local STATUS = {
-    available = { "Vermutlich verfügbar", 1.00, 0.82, 0.26, 1 },
-    active    = { "Im Questlog",          0.40, 0.72, 1.00, 2 },
-    blocked   = { "Gesperrt",             0.70, 0.72, 0.76, 3 },
-    unknown   = { "Unklar",               0.86, 0.74, 0.52, 4 },
-    done      = { "Abgeschlossen",       0.37, 0.87, 0.51, 5 },
+    confirmed = { L.confirmed, 0.37, 0.87, 0.51, 1 },
+    available = { L.available, 1.00, 0.82, 0.26, 2 },
+    active    = { L.active,    0.40, 0.72, 1.00, 3 },
+    blocked   = { L.blocked,   0.70, 0.72, 0.76, 4 },
+    check     = { L.check,     0.86, 0.74, 0.52, 5 },
+    done      = { L.done,      0.37, 0.87, 0.51, 6 },
 }
+if S.filter == "unknown" then S.filter = "check" end
 if S.filter ~= "all" and not STATUS[S.filter] then S.filter = "all" end
-
-local WHY = {
-    unknown = "Keine Daten zu dieser Quest.",
-    level = "Das Mindestlevel ist noch nicht erreicht.",
-    prerequisite = "Eine Voraussetzung aus der Questkette fehlt.",
-    exclusive = "Eine ausschließende Quest ist im Log oder abgeschlossen.",
-    skill = "Die bekannte Berufsanforderung ist nicht erfüllt.",
-    skill_unknown = "Fertigkeitsrang konnte nicht geprüft werden.",
-    parent = "Die zugehörige Quest muss im Questlog stehen.",
-    reputation = "Der laut Codex für Quest oder Belohnung nötige Rufrang fehlt.",
-    reputation_unknown = "Der Charakterruf konnte nicht geprüft werden.",
-}
-
-local LOAD_ERROR = {
-    off = "Aktiviere die Quest-Datenbank in Polestar unter Optionen → Questen → Quests.",
-    missing = "Installiere den Ordner Polestar_QuestDB aus dem vollständigen Polestar-Release.",
-    disabled = "Aktiviere Polestar_QuestDB im Add-on-Menü der Charakterauswahl.",
-    combat = "Die Questdatenbank wird nach dem Kampf geladen.",
-    empty = "Installiere Polestar und Polestar_QuestDB aus demselben Release.",
-}
 
 local ROW_HEIGHT = 29
 local index, zones, cachedIDs, indexedFor
@@ -65,6 +49,7 @@ local buttons, pool = {}, {}
 local snapshot, pending, rerenderHub, waitForCombat, waitForCodex, codexError
 local dirty = true
 local needle, previousZone = "", nil
+local offered, offerSource
 local drawing = false
 local codexSupported = Codex and Codex.Load and Codex.IsLoaded and Codex.Quest
 local readable = C.Readable or function(value) return value end
@@ -86,7 +71,7 @@ end
 
 local function mapName(id)
     local name = C.MapName and C.MapName(id)
-    return name or ("Zone #" .. id)
+    return name or L.zone_fallback:format(id)
 end
 
 local function renderHub()
@@ -162,8 +147,17 @@ local function fold(text)
     return text:lower()
 end
 
-local function questTitle(id)
-    return Q.GetQuestTitle(id) or ("Quest #" .. id)
+local function questTitle(id, record)
+    -- The full title getter can request uncached quests on localized clients.
+    local name = PS.Names and PS.Names.Cached and PS.Names.Cached("quest", id)
+    if name then return name end
+    if F.TITLE then
+        record = record or Q.QuestRecord(id)
+        name = record and record[F.TITLE]
+    else
+        name = Q.GetQuestTitle(id)
+    end
+    return name or L.quest_fallback:format(id)
 end
 
 local function missing(field, isDone, any)
@@ -190,12 +184,33 @@ local function exclusions(field, isDone, isOn, found)
 end
 
 local function standingName(rank)
-    return (PS.StandingName and PS.StandingName(rank)) or ("Rang " .. rank)
+    return (PS.StandingName and PS.StandingName(rank)) or L.rank_fallback:format(rank)
+end
+
+local function validStanding(rank)
+    return type(rank) == "number" and rank >= 1 and rank <= 8 and rank % 1 == 0
+end
+
+local function factionStanding(id)
+    local rank, name
+    if C.GetFactionStanding then
+        local ok, standing, _, _, _, factionName = pcall(C.GetFactionStanding, id)
+        if ok then rank, name = readable(standing), readable(factionName) end
+    end
+    if not validStanding(rank) and C_Reputation and C_Reputation.GetFactionDataByID and GetFactionInfoByID then
+        -- Polestar uses the legacy reader only if the modern API is absent.
+        local ok, factionName, _, standing = pcall(GetFactionInfoByID, id)
+        if ok then
+            rank = readable(standing)
+            name = name or readable(factionName)
+        end
+    end
+    return validStanding(rank) and rank or nil, name
 end
 
 local function zoneSnapshot(zone, useCodex)
     local rows = {}
-    local totals = { available = 0, active = 0, blocked = 0, unknown = 0, done = 0 }
+    local totals = { confirmed = 0, available = 0, active = 0, blocked = 0, check = 0, done = 0 }
     if not zone then return { rows = rows, totals = totals, useCodex = useCodex } end
 
     local ctx = Q.PlayerContext()
@@ -213,15 +228,10 @@ local function zoneSnapshot(zone, useCodex)
     end
     local function faction(id)
         if not factions[id] then
-            local rank, name
-            if C.GetFactionStanding then
-                local ok, standing, _, _, _, factionName = pcall(C.GetFactionStanding, id)
-                if ok then
-                    rank, name = readable(standing), readable(factionName)
-                end
-            end
+            local rank, name = factionStanding(id)
+            name = name or (PS.Names and PS.Names.Faction and PS.Names.Faction(id))
             local data = not name and Codex.Faction and Codex.Faction(id)
-            factions[id] = { rank = rank, name = name or (data and data.name) or ("Fraktion #" .. id) }
+            factions[id] = { rank = rank, name = name or (data and data.name) or L.faction_fallback:format(id) }
         end
         return factions[id]
     end
@@ -229,7 +239,7 @@ local function zoneSnapshot(zone, useCodex)
     for _, id in ipairs(index[zone].ids) do
         local r = Q.QuestRecord(id)
         local extra = useCodex and Codex.Quest(id)
-        local title = questTitle(id)
+        local title = questTitle(id, r)
         local row = { id = id, title = title, searchTitle = fold(title), level = r[F.LEVEL], minLevel = r[F.MIN] }
         local line = (extra and extra.skill) or r[F.SKILL]
         if line then
@@ -246,6 +256,9 @@ local function zoneSnapshot(zone, useCodex)
             state = "done"
         elseif isOn(id) then
             state = "active"
+            if C.IsQuestReadyForTurnIn and C.IsQuestReadyForTurnIn(id) then why = "ready" end
+        elseif offered and offered[id] then
+            state, why = "confirmed", "confirmed"
         else
             local available
             available, why = Q.CheckAvailable(id, ctx, isDone, isOn, opts)
@@ -266,13 +279,16 @@ local function zoneSnapshot(zone, useCodex)
                 elseif row.parent then
                     state, why = "blocked", "parent"
                 elseif row.skill and row.rank == nil then
-                    state, why = "unknown", "skill_unknown"
+                    state, why = "check", "skill_unknown"
                 elseif row.skill and row.rank < math.max(1, row.rankNeeded or 0) then
                     state, why = "blocked", "skill"
                 elseif row.rep and row.rep.rank == nil then
-                    state, why = "unknown", "reputation_unknown"
+                    state, why = "check", "reputation_unknown"
                 elseif row.rep and row.rep.rank < row.repNeeded then
-                    state, why = "blocked", "reputation"
+                    -- The Codex may describe a reward gate rather than acceptance.
+                    state, why = "check", "reputation"
+                else
+                    why = "estimated"
                 end
             end
         end
@@ -299,7 +315,20 @@ local function addPrereqs(tooltip, ids, label)
 end
 
 local function statusText(row)
-    return row.reason == "reputation" and "Ruf fehlt" or STATUS[row.state][1]
+    if row.reason == "ready" then return L.ready end
+    if row.reason == "reputation" then return L.reputation_required end
+    if row.reason == "reputation_unknown" then return L.check_reputation end
+    if row.reason == "skill_unknown" then return L.check_profession end
+    return STATUS[row.state][1]
+end
+
+local function skillName(line)
+    local name = C.GetSkillLineName and C.GetSkillLineName(line)
+    if not name and PS.Lookup and PS.Lookup.ProfessionName then
+        name = PS.Lookup.ProfessionName(line)
+        if name and PS.L then name = PS.L[name] or name end
+    end
+    return name or L.skill_fallback:format(line)
 end
 
 local function makeRow(i)
@@ -327,32 +356,33 @@ local function makeRow(i)
         if not r then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText(r.title, 1, 0.86, 0.37)
-        GameTooltip:AddLine("Quest-ID: " .. r.id .. "  |  Level: " .. tostring(r.level or "?"), 1, 1, 1)
+        GameTooltip:AddLine(L.quest_line:format(r.id, tostring(r.level or "?")), 1, 1, 1)
         local s = STATUS[r.state]
         GameTooltip:AddLine(statusText(r), s[2], s[3], s[4])
-        if r.minLevel then GameTooltip:AddLine("Mindestlevel: " .. r.minLevel, 0.83, 0.83, 0.83) end
-        if r.reason and WHY[r.reason] then GameTooltip:AddLine(WHY[r.reason], 1, 0.63, 0.3, true) end
-        addPrereqs(GameTooltip, r.missingAll, "Alle diese Vorquests fehlen:")
-        addPrereqs(GameTooltip, r.missingAny, "Eine dieser Vorquests wird benötigt:")
-        if r.parent then GameTooltip:AddLine("Benötigt im Questlog: " .. questTitle(r.parent), 1, 0.76, 0.3, true) end
+        if r.minLevel then GameTooltip:AddLine(L.min_level:format(r.minLevel), 0.83, 0.83, 0.83) end
+        local reason = r.reason and L["reason_" .. r.reason]
+        if reason then GameTooltip:AddLine(reason, s[2], s[3], s[4], true) end
+        addPrereqs(GameTooltip, r.missingAll, L.all_prereqs)
+        addPrereqs(GameTooltip, r.missingAny, L.any_prereq)
+        if r.parent then GameTooltip:AddLine(L.parent_required:format(questTitle(r.parent)), 1, 0.76, 0.3, true) end
         if r.conflicts then
-            GameTooltip:AddLine("Ausschließende Quests im Log oder abgeschlossen:", 1, 0.76, 0.3, true)
+            GameTooltip:AddLine(L.conflicting, 1, 0.76, 0.3, true)
             for id in pairs(r.conflicts) do
                 GameTooltip:AddLine("• " .. questTitle(id), 0.85, 0.85, 0.85, true)
             end
         end
         if r.skill then
-            local name = (C.GetSkillLineName and C.GetSkillLineName(r.skill)) or ("Fertigkeit #" .. r.skill)
             local need = r.rankNeeded and (" " .. r.rankNeeded) or ""
-            local have = r.rank ~= nil and tostring(r.rank) or "unbekannt"
-            GameTooltip:AddLine(("Beruf: %s%s (aktuell: %s)"):format(name, need, have), 0.83, 0.83, 0.83, true)
+            local have = r.rank ~= nil and tostring(r.rank) or L.unavailable
+            GameTooltip:AddLine(L.skill_requirement:format(skillName(r.skill), need, have), 0.83, 0.83, 0.83, true)
         end
         if r.rep then
-            local have = r.rep.rank and standingName(r.rep.rank) or "unbekannt"
-            GameTooltip:AddLine(("Ruf: %s – %s (aktuell: %s)"):format(r.rep.name, standingName(r.repNeeded), have),
+            local have = r.rep.rank and standingName(r.rep.rank) or L.unavailable
+            GameTooltip:AddLine(L.reputation_requirement:format(r.rep.name, standingName(r.repNeeded), have),
                 0.83, 0.83, 0.83, true)
+            GameTooltip:AddLine(L.reputation_gate_scope, 0.83, 0.83, 0.83, true)
         end
-        GameTooltip:AddLine("Klicken: Quest in Polestar öffnen", 0.5, 0.83, 1, true)
+        GameTooltip:AddLine(L.open_lookup, 0.5, 0.83, 1, true)
         GameTooltip:Show()
     end)
     b:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -377,12 +407,12 @@ local function refresh(repaintOnly)
     waitForCombat = reason == "combat"
     if not ok then
         snapshot = nil
-        heading:SetText("Quest Completion")
-        subtitle:SetText("Questdatenbank nicht verfügbar")
+        heading:SetText(L.title)
+        subtitle:SetText(L.database_unavailable)
         counts:SetText("")
         details:Hide()
         detailsHint:SetText("")
-        message:SetText(LOAD_ERROR[reason] or ("QuestDB konnte nicht geladen werden (" .. tostring(reason) .. ")."))
+        message:SetText(L["database_" .. tostring(reason)] or L.database_error:format(tostring(reason)))
         message:Show()
         for _, row in ipairs(pool) do row:Hide() end
         child:SetHeight(1)
@@ -396,33 +426,33 @@ local function refresh(repaintOnly)
         snapshot = zoneSnapshot(zone, useCodex)
         dirty = false
     end
-    local available, active, blocked, unknown, done = snapshot.totals.available, snapshot.totals.active,
-        snapshot.totals.blocked, snapshot.totals.unknown, snapshot.totals.done
-    local total = available + active + blocked + unknown + done
+    local totals = snapshot.totals
+    local total = #snapshot.rows
     local newNeedle = fold((Picker.Query and Picker.Query()) or needle)
     local resetScroll = zone ~= previousZone or newNeedle ~= needle
     previousZone, needle = zone, newNeedle
 
-    heading:SetText(zone and index[zone].name or "Keine Zone gefunden")
+    heading:SetText(zone and index[zone].name or L.no_zone)
     if total > 0 then
+        local done = totals.done
         local pct = math.floor(done * 100 / total + 0.5)
         if done < total then pct = math.min(pct, 99) end
-        subtitle:SetText(("%d / %d abgeschlossen (%d %%)"):format(done, total, pct))
+        subtitle:SetText(L.completion:format(done, total, pct))
     else
-        subtitle:SetText("– / – abgeschlossen")
+        subtitle:SetText(L.no_completion)
     end
-    counts:SetText(("%d verfügbar  ·  %d im Log  ·  %d gesperrt  ·  %d unklar"):format(available, active, blocked, unknown))
+    counts:SetText(L.counts:format(totals.available + totals.confirmed, totals.active, totals.blocked, totals.check))
     details:SetShown(codexSupported and not useCodex or false)
     if useCodex then
-        detailsHint:SetText("Ruf und Voraussetzungen laut Polestar. Details beim Überfahren einer Quest.")
+        detailsHint:SetText(L.codex_loaded)
     elseif not codexSupported then
-        detailsHint:SetText("Verfügbarkeit geschätzt. Rufdetails benötigen eine kompatible Polestar-Codex-Version.")
+        detailsHint:SetText(L.codex_unsupported)
     elseif waitForCodex then
-        detailsHint:SetText("Der Codex wird nach dem Kampf geladen.")
+        detailsHint:SetText(L.codex_combat)
     elseif codexError then
-        detailsHint:SetText("Codex nicht verfügbar. Prüfe Polestar_Codex in deiner Polestar-Installation.")
+        detailsHint:SetText(L.codex_error)
     else
-        detailsHint:SetText("Verfügbarkeit geschätzt. Für bekannte Rufanforderungen den Codex laden.")
+        detailsHint:SetText(L.codex_optional)
     end
     for key, button in pairs(buttons) do
         if key == S.filter then button:LockHighlight() else button:UnlockHighlight() end
@@ -431,7 +461,7 @@ local function refresh(repaintOnly)
     local width = math.max(1, child:GetWidth() - 8)
     local visible = 0
     for _, data in ipairs(snapshot.rows) do
-        if (S.filter == "all" or S.filter == data.state)
+        if (S.filter == "all" or S.filter == data.state or (S.filter == "available" and data.state == "confirmed"))
             and (needle == "" or data.searchTitle:find(needle, 1, true) or tostring(data.id):find(needle, 1, true)) then
             visible = visible + 1
             local row = pool[visible] or makeRow(visible)
@@ -450,8 +480,7 @@ local function refresh(repaintOnly)
     end
     for i = visible + 1, #pool do pool[i]:Hide() end
     child:SetHeight(math.max(1, visible * ROW_HEIGHT + 8))
-    message:SetText(total == 0 and "Keine Quests mit Zonenkennung für diesen Charakter gefunden."
-        or "Keine Quests zu diesem Filter gefunden.")
+    message:SetText(total == 0 and L.no_quests or L.no_results)
     message:SetShown(visible == 0)
     if resetScroll then scroll:SetVerticalScroll(0) end
     drawing = false
@@ -494,7 +523,7 @@ local function build(parent)
     local now = CreateFrame("Button", nil, root, "UIPanelButtonTemplate")
     now:SetSize(120, 23)
     now:SetPoint("TOPRIGHT", root, "TOPRIGHT", -18, -10)
-    now:SetText("Aktuelle Zone")
+    now:SetText(L.current_zone)
     now:SetScript("OnClick", function()
         local zone = currentZone()
         if zone and zone ~= S.zone then
@@ -504,17 +533,17 @@ local function build(parent)
     end)
 
     details = CreateFrame("Button", nil, root, "UIPanelButtonTemplate")
-    details:SetSize(112, 23)
+    details:SetSize(145, 23)
     details:SetPoint("TOPRIGHT", now, "BOTTOMRIGHT", 0, -5)
-    details:SetText("Ruf & Details")
+    details:SetText(L.details)
     details:SetScript("OnClick", loadDetails)
 
-    filterButton("all", "Alle", 14, 58)
-    filterButton("available", "Verfügbar", 76, 92)
-    filterButton("active", "Im Log", 172, 68)
-    filterButton("blocked", "Gesperrt", 244, 84)
-    filterButton("unknown", "Unklar", 332, 72)
-    filterButton("done", "Fertig", 408, 64)
+    filterButton("all", L.filter_all, 14, 58)
+    filterButton("available", L.filter_available, 76, 92)
+    filterButton("active", L.filter_active, 172, 68)
+    filterButton("blocked", L.filter_blocked, 244, 84)
+    filterButton("check", L.filter_check, 332, 80)
+    filterButton("done", L.filter_done, 416, 64)
     detailsHint = root:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
     detailsHint:SetPoint("TOPLEFT", root, "TOPLEFT", 18, -104)
     detailsHint:SetPoint("RIGHT", root, "RIGHT", -18, 0)
@@ -540,7 +569,7 @@ local function build(parent)
 end
 
 local function nav()
-    if not snapshot then return { { key = "none", label = "Keine Daten" } }, "none" end
+    if not snapshot then return { { key = "none", label = L.no_data } }, "none" end
     local items = {}
     for _, zone in ipairs(zones) do
         items[#items + 1] = { key = tostring(zone.id), label = zone.name, count = #zone.ids, icon = "guides" }
@@ -550,7 +579,7 @@ end
 
 if not UI.RegisterSection({
     key = SECTION,
-    label = "Quests",
+    label = L.quests,
     icon = "guides",
     order = 35,
     build = build,
@@ -570,7 +599,7 @@ if not UI.RegisterSection({
         end
         refresh(true)
     end,
-    searchPlaceholder = "Questname oder Quest-ID suchen",
+    searchPlaceholder = L.search,
 }) then return end
 
 SlashCmdList.POLESTARQUESTCOMPLETION = function()
@@ -594,13 +623,57 @@ local function scheduleRefresh(updateHub)
     end)
 end
 
+local OFFER_EVENTS = { GOSSIP_SHOW = "gossip", QUEST_GREETING = "greeting", QUEST_DETAIL = "detail" }
+
+local function clearOffers()
+    if not offered then return end
+    offered, offerSource = nil, nil
+    scheduleRefresh()
+end
+
+local function readOffers(source)
+    local ok, ids = pcall(C.GetOfferedQuests, source)
+    local offers
+    if ok and type(ids) == "table" then
+        for _, id in ipairs(ids) do
+            id = readable(id)
+            if type(id) == "number" and id > 0 then
+                offers = offers or {}
+                offers[id] = true
+            end
+        end
+    end
+    if offers then
+        offered, offerSource = offers, source
+        scheduleRefresh()
+    else
+        clearOffers()
+    end
+end
+
 local events = CreateFrame("Frame")
 for _, event in ipairs({ "QUEST_TURNED_IN", "QUEST_ACCEPTED", "QUEST_REMOVED", "QUEST_LOG_UPDATE",
     "PLAYER_LEVEL_UP", "SKILL_LINES_CHANGED", "UPDATE_FACTION", "PLAYER_REGEN_ENABLED" }) do
     events:RegisterEvent(event)
 end
+if C.GetOfferedQuests then
+    for event in pairs(OFFER_EVENTS) do events:RegisterEvent(event) end
+    for _, event in ipairs({ "GOSSIP_CLOSED", "QUEST_FINISHED", "QUEST_PROGRESS", "QUEST_COMPLETE",
+        "PLAYER_LEAVING_WORLD" }) do
+        events:RegisterEvent(event)
+    end
+end
 events:SetScript("OnEvent", function(_, event)
-    if event == "PLAYER_REGEN_ENABLED" then
+    local source = OFFER_EVENTS[event]
+    if source then
+        readOffers(source)
+    elseif event == "GOSSIP_CLOSED" then
+        if offerSource == "gossip" then clearOffers() end
+    elseif event == "QUEST_FINISHED" then
+        if offerSource ~= "gossip" then clearOffers() end
+    elseif event == "QUEST_PROGRESS" or event == "QUEST_COMPLETE" or event == "PLAYER_LEAVING_WORLD" then
+        clearOffers()
+    elseif event == "PLAYER_REGEN_ENABLED" then
         if waitForCodex and root and root:IsVisible() then loadDetails() end
         if waitForCombat then scheduleRefresh() end
     elseif root and (event ~= "UPDATE_FACTION" or hasCodex()) then
@@ -613,4 +686,8 @@ if PS.On then
         if path == "qol.questDB" or path == "qol" or path == "" then scheduleRefresh(true) end
     end)
     PS.On("CODEX_LOADED", function() scheduleRefresh() end)
+    PS.On("NAMES_LOADED", function()
+        cachedIDs = nil
+        scheduleRefresh(true)
+    end)
 end
